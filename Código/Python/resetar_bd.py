@@ -15,7 +15,7 @@ for (tabela,) in cur.fetchall():
 con.commit()
 print("Banco limpo com sucesso!")
 
-with open("/home/leorissetto/Developer/Trabalho-Lab-BD/Código/SQL/tabelas_postgresql.sql") as f:
+with open("./../SQL/tabelas_postgresql.sql") as f:
     sql_script = f.read()
 for statement in sql_script.split(';'):
     stmt = statement.strip()

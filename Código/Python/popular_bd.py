@@ -1,14 +1,11 @@
 import psycopg2
 from faker import Faker
 import random
-from datetime import datetime, timedelta
+from datetime import timedelta
 import sys
 from decimal import Decimal
 
-# Configuração do Faker para português brasileiro
 fake = Faker('pt_BR')
-
-# Configurações de conexão com o banco de dados
 DB_CONFIG = {
     'host': 'localhost',
     'database': 'postgres',
@@ -17,7 +14,6 @@ DB_CONFIG = {
     'port': 5432
 }
 
-# Listas para armazenar IDs gerados e reutilizar nas foreign keys
 pessoas_cpfs = []
 voluntarios_cpfs = []
 adotantes_cpfs = []
@@ -27,13 +23,10 @@ campanhas_ids = []
 eventos_ids = []
 lares_ids = []
 enderecos_ids = []
-enderecos_usados_lares = []  # Para controlar endereços únicos de lares
+enderecos_usados_lares = []
 
 
 def limpar_banco(cursor):
-    """Limpa todas as tabelas do banco de dados"""
-    print("Limpando tabelas existentes...")
-    
     # Ordem de limpeza respeitando as foreign keys
     tabelas = [
         'devolucao', 'adocao', 'fotos_triagem', 'triagem', 'preferencia',
@@ -42,17 +35,13 @@ def limpar_banco(cursor):
         'doacao', 'funcao', 'lar_temporario', 'veterinario', 'adotante',
         'voluntario', 'evento', 'campanha', 'gato', 'pessoa', 'endereco'
     ]
-    
     for tabela in tabelas:
         cursor.execute(f"DELETE FROM {tabela}")
-        print(f"  Tabela {tabela} limpa")
 
 
 def conectar_bd():
-    """Conecta ao banco de dados PostgreSQL"""
     try:
-        conn = psycopg2.connect(**DB_CONFIG)
-        return conn
+        return psycopg2.connect(**DB_CONFIG)
     except Exception as e:
         print(f"Erro ao conectar ao banco de dados: {e}")
         sys.exit(1)
@@ -569,71 +558,38 @@ def atualizar_responsaveis_lares(cursor):
 
 
 def main():
-    """Função principal que executa a população do banco de dados"""
-    print("Iniciando população do banco de dados...")
-    print("=" * 50)
-    
-    # Limpa o cache do faker para garantir valores únicos
     fake.unique.clear()
-    
     conn = conectar_bd()
     cursor = conn.cursor()
-    
     try:
-        # Limpa dados existentes
         limpar_banco(cursor)
-        
-        # 1. Popula tabelas base sem foreign keys
-        popular_enderecos(cursor, 2000)    # 10x mais endereços
-        popular_pessoas(cursor, 1500)      # 15x mais pessoas
-        popular_gatos(cursor, 800)         # 16x mais gatos
-        popular_campanhas(cursor, 50)      # 5x mais campanhas
-        popular_eventos(cursor, 120)       # 6x mais eventos
-        
-        # 2. Popula especializações de Pessoa (dependem de Pessoa)
-        popular_voluntarios(cursor, 200)   # ~7x mais voluntários
-        popular_adotantes(cursor, 400)     # 10x mais adotantes
-        popular_veterinarios(cursor, 25)   # ~3x mais veterinários
-        
-        # 3. Popula lares temporários (agora que voluntários existem)
-        popular_lares_temporarios(cursor, 80)  # ~5x mais lares
-        
-        # Popula tabelas de relacionamento e transacionais
+        popular_enderecos(cursor, 2000)
+        popular_pessoas(cursor, 1500)
+        popular_gatos(cursor, 800)
+        popular_campanhas(cursor, 50)
+        popular_eventos(cursor, 120)
+        popular_voluntarios(cursor, 200)
+        popular_adotantes(cursor, 400)
+        popular_veterinarios(cursor, 25)
+        popular_lares_temporarios(cursor, 80)
         popular_funcoes(cursor)
-        popular_doacoes(cursor, 1200)      # 15x mais doações
+        popular_doacoes(cursor, 1200)
         popular_participantes(cursor)
-        popular_contatos(cursor, 2500)     # 25x mais contatos
+        popular_contatos(cursor, 2500)
         popular_cuida_lar(cursor)
         popular_voluntarios_evento(cursor)
         popular_gatos_evento(cursor)
         popular_fotos_gato(cursor)
         popular_hospedagem(cursor)
-        popular_gastos(cursor, 2000)       # ~13x mais gastos
-        popular_procedimentos(cursor, 1500) # 15x mais procedimentos
+        popular_gastos(cursor, 2000)
+        popular_procedimentos(cursor, 1500)
         popular_preferencias(cursor)
         popular_triagens(cursor)
         popular_fotos_triagem(cursor)
-        popular_adocoes(cursor, 300)       # 15x mais adoções
-        popular_devolucoes(cursor, 25)     # ~8x mais devoluções
-        
-        # Atualiza campos que dependem de outros dados
+        popular_adocoes(cursor, 300)
+        popular_devolucoes(cursor, 25)
         atualizar_responsaveis_lares(cursor)
-        
-        # Commit das transações
         conn.commit()
-        
-        print("=" * 50)
-        print("População do banco de dados concluída com sucesso!")
-        print(f"Total de endereços inseridos: {len(enderecos_ids)}")
-        print(f"Total de pessoas inseridas: {len(pessoas_cpfs)}")
-        print(f"Total de voluntários: {len(voluntarios_cpfs)}")
-        print(f"Total de adotantes: {len(adotantes_cpfs)}")
-        print(f"Total de veterinários: {len(veterinarios_cpfs)}")
-        print(f"Total de gatos: {len(gatos_ids)}")
-        print(f"Total de campanhas: {len(campanhas_ids)}")
-        print(f"Total de eventos: {len(eventos_ids)}")
-        print(f"Total de lares temporários: {len(lares_ids)}")
-        
     except Exception as e:
         print(f"Erro durante a população do banco: {e}")
         conn.rollback()
