@@ -14,6 +14,9 @@ CREATE TABLE endereco (
     CONSTRAINT chk_endereco_estado CHECK (LENGTH(estado) = 2 AND estado ~ '^[A-Z]{2}$')
 );
 
+CREATE UNIQUE INDEX uq_endereco_unico
+ON endereco (cep, rua, numero, bairro, cidade, estado, COALESCE(complemento, ''));
+
 -- Tabela para armazenar dados de todas as pessoas envolvidas (voluntários, adotantes, etc.).
 CREATE TABLE pessoa (
     cpf VARCHAR(11) NOT NULL PRIMARY KEY,
@@ -96,6 +99,7 @@ CREATE TABLE campanha (
     premio VARCHAR(255),
     vencedor_cpf VARCHAR(11),
     FOREIGN KEY (vencedor_cpf) REFERENCES pessoa(cpf) ON DELETE SET NULL,
+    CONSTRAINT uq_campanha_nome_data UNIQUE (nome, data_inicio),
     CONSTRAINT chk_datas_campanha CHECK (
         (data_inicio IS NOT NULL AND data_fim IS NULL) OR
         (data_inicio IS NOT NULL AND data_fim IS NOT NULL AND data_fim >= data_inicio) OR
@@ -149,6 +153,7 @@ CREATE TABLE evento (
     data_fim DATE,
     endereco_id INT,
     FOREIGN KEY (endereco_id) REFERENCES endereco(id) ON DELETE SET NULL,
+    CONSTRAINT uq_evento_nome_data UNIQUE (nome, data_inicio),
     CONSTRAINT chk_datas_evento CHECK (
         (data_inicio IS NOT NULL AND data_fim IS NULL) OR
         (data_inicio IS NOT NULL AND data_fim IS NOT NULL AND data_fim >= data_inicio) OR
@@ -184,17 +189,15 @@ CREATE TABLE fotos_gato (
 
 -- Tabela de relacionamento N:M entre Gato e Lar_Temporario.
 CREATE TABLE hospedagem (
-    id SERIAL PRIMARY KEY,
     lar_temporario_id INT NOT NULL,
     gato_id INT NOT NULL,
-    data_entrada DATE,
+    data_entrada DATE NOT NULL,
     data_saida DATE,
+    PRIMARY KEY (lar_temporario_id, gato_id, data_entrada),
     FOREIGN KEY (lar_temporario_id) REFERENCES lar_temporario(id) ON DELETE CASCADE,
     FOREIGN KEY (gato_id) REFERENCES gato(id) ON DELETE CASCADE,
     CONSTRAINT chk_hospedagem_datas CHECK (
-        (data_entrada IS NOT NULL AND data_saida IS NULL AND data_entrada <= CURRENT_DATE) OR
-        (data_entrada IS NOT NULL AND data_saida IS NOT NULL AND data_saida >= data_entrada) OR
-        (data_entrada IS NULL AND data_saida IS NULL)
+        (data_saida IS NULL OR data_saida >= data_entrada)
     )
 );
 
