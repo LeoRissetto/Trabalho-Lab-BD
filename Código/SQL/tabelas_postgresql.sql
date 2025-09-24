@@ -1,238 +1,287 @@
 -- Versão PostgreSQL das tabelas do sistema de adoção de gatos
 
+-- Tabela centralizada para endereços (normalização)
+CREATE TABLE endereco (
+    id SERIAL PRIMARY KEY,
+    cep VARCHAR(8) NOT NULL,
+    rua VARCHAR(255),
+    numero VARCHAR(10),
+    bairro VARCHAR(100),
+    complemento VARCHAR(100),
+    cidade VARCHAR(100) NOT NULL,
+    estado VARCHAR(2) NOT NULL,
+    CONSTRAINT chk_endereco_cep CHECK (LENGTH(cep) = 8 AND cep ~ '^[0-9]+$'),
+    CONSTRAINT chk_endereco_estado CHECK (LENGTH(estado) = 2 AND estado ~ '^[A-Z]{2}$')
+);
+
 -- Tabela para armazenar dados de todas as pessoas envolvidas (voluntários, adotantes, etc.).
-CREATE TABLE Pessoa (
-    CPF VARCHAR(11) NOT NULL PRIMARY KEY,
+CREATE TABLE pessoa (
+    cpf VARCHAR(11) NOT NULL PRIMARY KEY,
     nome VARCHAR(255) NOT NULL,
     telefone VARCHAR(15),
     email VARCHAR(255) UNIQUE,
-    CEP VARCHAR(8),
-    numero VARCHAR(10),
-    bairro VARCHAR(100),
-    rua VARCHAR(255)
+    endereco_id INT,
+    FOREIGN KEY (endereco_id) REFERENCES endereco(id) ON DELETE SET NULL,
+    CONSTRAINT chk_cpf_valido CHECK (LENGTH(cpf) = 11 AND cpf ~ '^[0-9]+$'),
+    CONSTRAINT chk_email_valido CHECK (email IS NULL OR email ~ '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'),
+    CONSTRAINT chk_telefone_valido CHECK (telefone IS NULL OR LENGTH(telefone) >= 10)
 );
 
 -- Tabela para armazenar informações sobre os gatos.
-CREATE TABLE Gato (
-    ID SERIAL PRIMARY KEY,  -- PostgreSQL usa SERIAL ao invés de AUTO_INCREMENT
+CREATE TABLE gato (
+    id SERIAL PRIMARY KEY,
     nome VARCHAR(100),
     idade INT,
     data_resgate DATE,
-    CEP VARCHAR(8),
-    numero VARCHAR(10),
-    bairro VARCHAR(100),
-    rua VARCHAR(255),
+    endereco_resgate_id INT,
     cor VARCHAR(50),
     raca VARCHAR(50),
-    cond_saude TEXT,
-    flag_adotado BOOLEAN DEFAULT FALSE
+    condicao_saude TEXT,
+    adotado BOOLEAN DEFAULT FALSE,
+    FOREIGN KEY (endereco_resgate_id) REFERENCES endereco(id) ON DELETE SET NULL,
+    CONSTRAINT chk_gato_idade CHECK (idade IS NULL OR (idade >= 0 AND idade <= 30)),
+    CONSTRAINT chk_gato_data_resgate CHECK (data_resgate <= CURRENT_DATE)
 );
 
 -- Tabela de especialização para Voluntários.
-CREATE TABLE Voluntario (
-    CPF VARCHAR(11) NOT NULL PRIMARY KEY,
-    FOREIGN KEY (CPF) REFERENCES Pessoa(CPF)
+CREATE TABLE voluntario (
+    cpf VARCHAR(11) NOT NULL PRIMARY KEY,
+    FOREIGN KEY (cpf) REFERENCES pessoa(cpf) ON DELETE CASCADE
 );
 
 -- Tabela de especialização para Adotantes.
-CREATE TABLE Adotante (
-    CPF VARCHAR(11) NOT NULL PRIMARY KEY,
-    flag_procurando_gato BOOLEAN,
-    FOREIGN KEY (CPF) REFERENCES Pessoa(CPF)
+CREATE TABLE adotante (
+    cpf VARCHAR(11) NOT NULL PRIMARY KEY,
+    procurando_gato BOOLEAN DEFAULT FALSE,
+    FOREIGN KEY (cpf) REFERENCES pessoa(cpf) ON DELETE CASCADE
 );
 
 -- Tabela de especialização para Veterinários.
-CREATE TABLE Veterinario (
-    CPF VARCHAR(11) NOT NULL PRIMARY KEY,
-    CRMV VARCHAR(20) NOT NULL UNIQUE,
+CREATE TABLE veterinario (
+    cpf VARCHAR(11) NOT NULL PRIMARY KEY,
+    crmv VARCHAR(20) NOT NULL UNIQUE,
     especialidade VARCHAR(100),
     clinica VARCHAR(255),
-    FOREIGN KEY (CPF) REFERENCES Pessoa(CPF)
+    FOREIGN KEY (cpf) REFERENCES pessoa(cpf) ON DELETE CASCADE,
+    CONSTRAINT chk_crmv_formato CHECK (crmv ~ '^[0-9]+-[A-Z]{2}$')
 );
 
 -- Tabela para as funções de um voluntário.
-CREATE TABLE Funcao (
-    Voluntario_CPF VARCHAR(11) NOT NULL,
+CREATE TABLE funcao (
+    voluntario_cpf VARCHAR(11) NOT NULL,
     funcao VARCHAR(100) NOT NULL,
-    PRIMARY KEY (Voluntario_CPF, funcao),
-    FOREIGN KEY (Voluntario_CPF) REFERENCES Voluntario(CPF)
+    PRIMARY KEY (voluntario_cpf, funcao),
+    FOREIGN KEY (voluntario_cpf) REFERENCES voluntario(cpf) ON DELETE CASCADE
 );
 
 -- Tabela para registrar doações.
-CREATE TABLE Doacao (
-    ID SERIAL PRIMARY KEY,  -- PostgreSQL usa SERIAL
+CREATE TABLE doacao (
+    id SERIAL PRIMARY KEY,
     data DATE NOT NULL,
     valor DECIMAL(10, 2) NOT NULL,
-    forma_de_pagamento VARCHAR(50),
-    Pessoa_CPF VARCHAR(11) NOT NULL,
-    FOREIGN KEY (Pessoa_CPF) REFERENCES Pessoa(CPF)
+    forma_pagamento VARCHAR(50),
+    pessoa_cpf VARCHAR(11),
+    FOREIGN KEY (pessoa_cpf) REFERENCES pessoa(cpf) ON DELETE RESTRICT,
+    CONSTRAINT chk_valor_positivo CHECK (valor > 0),
+    CONSTRAINT chk_data_doacao CHECK (data <= CURRENT_DATE),
+    CONSTRAINT chk_forma_pagamento CHECK (forma_pagamento IS NULL OR forma_pagamento IN ('DINHEIRO', 'PIX', 'CARTAO_CREDITO', 'CARTAO_DEBITO', 'TRANSFERENCIA', 'OUTROS'))
 );
 
 -- Tabela para as campanhas.
-CREATE TABLE Campanha (
-    nome VARCHAR(255) NOT NULL PRIMARY KEY,
-    data_ini DATE,
+CREATE TABLE campanha (
+    id SERIAL PRIMARY KEY,
+    nome VARCHAR(255) NOT NULL,
+    data_inicio DATE,
     data_fim DATE,
     premio VARCHAR(255),
-    vencedor_CPF VARCHAR(11),
-    FOREIGN KEY (vencedor_CPF) REFERENCES Pessoa(CPF)
+    vencedor_cpf VARCHAR(11),
+    FOREIGN KEY (vencedor_cpf) REFERENCES pessoa(cpf) ON DELETE SET NULL,
+    CONSTRAINT chk_datas_campanha CHECK (
+        (data_inicio IS NOT NULL AND data_fim IS NULL) OR
+        (data_inicio IS NOT NULL AND data_fim IS NOT NULL AND data_fim >= data_inicio) OR
+        (data_inicio IS NULL AND data_fim IS NULL)
+    )
 );
 
 -- Tabela de relacionamento N:M entre Pessoa e Campanha.
-CREATE TABLE Participantes (
-    Pessoa_CPF VARCHAR(11) NOT NULL,
-    Campanha_nome VARCHAR(255) NOT NULL,
-    PRIMARY KEY (Pessoa_CPF, Campanha_nome),
-    FOREIGN KEY (Pessoa_CPF) REFERENCES Pessoa(CPF),
-    FOREIGN KEY (Campanha_nome) REFERENCES Campanha(nome)
+CREATE TABLE participantes (
+    pessoa_cpf VARCHAR(11) NOT NULL,
+    campanha_id INT NOT NULL,
+    PRIMARY KEY (pessoa_cpf, campanha_id),
+    FOREIGN KEY (pessoa_cpf) REFERENCES pessoa(cpf) ON DELETE CASCADE,
+    FOREIGN KEY (campanha_id) REFERENCES campanha(id) ON DELETE CASCADE
 );
 
 -- Tabela para registrar contatos feitos.
-CREATE TABLE Contato (
-    Pessoa_CPF VARCHAR(11) NOT NULL,
-    data TIMESTAMP NOT NULL,  -- PostgreSQL usa TIMESTAMP ao invés de DATETIME
+CREATE TABLE contato (
+    pessoa_cpf VARCHAR(11) NOT NULL,
+    data_hora TIMESTAMP NOT NULL,
     assunto TEXT,
-    PRIMARY KEY (Pessoa_CPF, data),
-    FOREIGN KEY (Pessoa_CPF) REFERENCES Pessoa(CPF)
+    PRIMARY KEY (pessoa_cpf, data_hora),
+    FOREIGN KEY (pessoa_cpf) REFERENCES pessoa(cpf) ON DELETE CASCADE
 );
 
 -- Tabela para os lares temporários.
-CREATE TABLE Lar_Temporario (
-    ID SERIAL PRIMARY KEY,  -- PostgreSQL usa SERIAL
-    nome VARCHAR(255),
-    CEP VARCHAR(8),
-    numero VARCHAR(10),
-    bairro VARCHAR(100),
-    rua VARCHAR(255),
-    capacidade_max INT,
-    Voluntario_responsavel_CPF VARCHAR(11),
-    FOREIGN KEY (Voluntario_responsavel_CPF) REFERENCES Voluntario(CPF)
+CREATE TABLE lar_temporario (
+    id SERIAL PRIMARY KEY,
+    endereco_id INT NOT NULL UNIQUE,
+    capacidade_maxima INT,
+    responsavel_cpf VARCHAR(11),
+    FOREIGN KEY (endereco_id) REFERENCES endereco(id) ON DELETE CASCADE,
+    FOREIGN KEY (responsavel_cpf) REFERENCES voluntario(cpf) ON DELETE SET NULL,
+    CONSTRAINT chk_capacidade_positiva CHECK (capacidade_maxima IS NULL OR capacidade_maxima > 0)
 );
 
 -- Tabela de relacionamento N:M entre Voluntario e Lar_Temporario.
-CREATE TABLE Cuida_Lar (
-    Lar_ID INT NOT NULL,
-    Voluntario_CPF VARCHAR(11) NOT NULL,
-    PRIMARY KEY (Lar_ID, Voluntario_CPF),
-    FOREIGN KEY (Lar_ID) REFERENCES Lar_Temporario(ID),
-    FOREIGN KEY (Voluntario_CPF) REFERENCES Voluntario(CPF)
+CREATE TABLE cuida_lar (
+    lar_id INT NOT NULL,
+    voluntario_cpf VARCHAR(11) NOT NULL,
+    PRIMARY KEY (lar_id, voluntario_cpf),
+    FOREIGN KEY (lar_id) REFERENCES lar_temporario(id) ON DELETE CASCADE,
+    FOREIGN KEY (voluntario_cpf) REFERENCES voluntario(cpf) ON DELETE CASCADE
 );
 
 -- Tabela de eventos.
-CREATE TABLE Evento (
-    ID SERIAL PRIMARY KEY,  -- PostgreSQL usa SERIAL
+CREATE TABLE evento (
+    id SERIAL PRIMARY KEY,
     nome VARCHAR(255) NOT NULL,
-    data TIMESTAMP NOT NULL,  -- PostgreSQL usa TIMESTAMP
-    CEP VARCHAR(8),
-    numero VARCHAR(10),
-    bairro VARCHAR(100),
-    rua VARCHAR(255)
+    data_inicio DATE,
+    data_fim DATE,
+    endereco_id INT,
+    FOREIGN KEY (endereco_id) REFERENCES endereco(id) ON DELETE SET NULL,
+    CONSTRAINT chk_datas_evento CHECK (
+        (data_inicio IS NOT NULL AND data_fim IS NULL) OR
+        (data_inicio IS NOT NULL AND data_fim IS NOT NULL AND data_fim >= data_inicio) OR
+        (data_inicio IS NULL AND data_fim IS NULL)
+    )
 );
 
--- Tabela de relacionamento N:M:N para participação em eventos.
-CREATE TABLE Participa_Evento (
-    Voluntario_CPF VARCHAR(11) NOT NULL,
-    Gato_ID INT NOT NULL,
-    Evento_ID INT NOT NULL,
-    PRIMARY KEY (Voluntario_CPF, Gato_ID, Evento_ID),
-    FOREIGN KEY (Voluntario_CPF) REFERENCES Voluntario(CPF),
-    FOREIGN KEY (Gato_ID) REFERENCES Gato(ID),
-    FOREIGN KEY (Evento_ID) REFERENCES Evento(ID)
+-- Voluntários que organizam/participam do evento
+CREATE TABLE voluntarios_evento (
+    evento_id INT NOT NULL,
+    voluntario_cpf VARCHAR(11) NOT NULL,
+    PRIMARY KEY (evento_id, voluntario_cpf),
+    FOREIGN KEY (evento_id) REFERENCES evento(id) ON DELETE CASCADE,
+    FOREIGN KEY (voluntario_cpf) REFERENCES voluntario(cpf) ON DELETE CASCADE
+);
+
+-- Gatos que participam do evento  
+CREATE TABLE gatos_evento (
+    evento_id INT NOT NULL,
+    gato_id INT NOT NULL,
+    PRIMARY KEY (evento_id, gato_id),
+    FOREIGN KEY (evento_id) REFERENCES evento(id) ON DELETE CASCADE,
+    FOREIGN KEY (gato_id) REFERENCES gato(id) ON DELETE CASCADE
 );
 
 -- Tabela para armazenar as fotos dos gatos.
-CREATE TABLE Fotos_Gato (
-    Gato_ID INT NOT NULL,
+CREATE TABLE fotos_gato (
+    gato_id INT NOT NULL,
     foto_url VARCHAR(255) NOT NULL,
-    PRIMARY KEY (Gato_ID, foto_url),
-    FOREIGN KEY (Gato_ID) REFERENCES Gato(ID)
+    PRIMARY KEY (gato_id, foto_url),
+    FOREIGN KEY (gato_id) REFERENCES gato(id) ON DELETE CASCADE
 );
 
 -- Tabela de relacionamento N:M entre Gato e Lar_Temporario.
-CREATE TABLE Hospedagem (
-    Lar_Temporario_ID INT NOT NULL,
-    Gato_ID INT NOT NULL,
+CREATE TABLE hospedagem (
+    id SERIAL PRIMARY KEY,
+    lar_temporario_id INT NOT NULL,
+    gato_id INT NOT NULL,
     data_entrada DATE,
     data_saida DATE,
-    PRIMARY KEY (Lar_Temporario_ID, Gato_ID),
-    FOREIGN KEY (Lar_Temporario_ID) REFERENCES Lar_Temporario(ID),
-    FOREIGN KEY (Gato_ID) REFERENCES Gato(ID)
+    FOREIGN KEY (lar_temporario_id) REFERENCES lar_temporario(id) ON DELETE CASCADE,
+    FOREIGN KEY (gato_id) REFERENCES gato(id) ON DELETE CASCADE,
+    CONSTRAINT chk_hospedagem_datas CHECK (
+        (data_entrada IS NOT NULL AND data_saida IS NULL AND data_entrada <= CURRENT_DATE) OR
+        (data_entrada IS NOT NULL AND data_saida IS NOT NULL AND data_saida >= data_entrada) OR
+        (data_entrada IS NULL AND data_saida IS NULL)
+    )
 );
 
 -- Tabela para registrar gastos relacionados a um gato ou a um lar.
-CREATE TABLE Gasto (
-    ID SERIAL PRIMARY KEY,  -- PostgreSQL usa SERIAL
+CREATE TABLE gasto (
+    id SERIAL PRIMARY KEY,
     data DATE NOT NULL,
     valor DECIMAL(10, 2) NOT NULL,
+    tipo VARCHAR(50) NOT NULL,
     descricao TEXT,
-    tipo VARCHAR(100),
-    Lar_ID INT,
-    Gato_ID INT,
-    FOREIGN KEY (Lar_ID) REFERENCES Lar_Temporario(ID),
-    FOREIGN KEY (Gato_ID) REFERENCES Gato(ID)
+    lar_id INT,
+    gato_id INT,
+    FOREIGN KEY (lar_id) REFERENCES lar_temporario(id) ON DELETE SET NULL,
+    FOREIGN KEY (gato_id) REFERENCES gato(id) ON DELETE SET NULL,
+    CONSTRAINT chk_gasto_valor CHECK (valor >= 0),
+    CONSTRAINT chk_gasto_data CHECK (data <= CURRENT_DATE),
+    CONSTRAINT chk_gasto_referencia CHECK ((lar_id IS NOT NULL AND gato_id IS NULL) OR (lar_id IS NULL AND gato_id IS NOT NULL)),
+    CONSTRAINT chk_gasto_tipo CHECK (tipo IN ('ALIMENTACAO', 'VETERINARIO', 'MEDICAMENTO', 'HIGIENE', 'TRANSPORTE', 'MANUTENCAO', 'OUTROS'))
 );
 
 -- Tabela para os procedimentos veterinários realizados em um gato.
-CREATE TABLE Procedimento (
-    Gato_ID INT NOT NULL,
-    Veterinario_CPF VARCHAR(11) NOT NULL,
-    data_hora TIMESTAMP NOT NULL,  -- PostgreSQL usa TIMESTAMP
-    tipo VARCHAR(255),
+CREATE TABLE procedimento (
+    gato_id INT NOT NULL,
+    veterinario_cpf VARCHAR(11) NOT NULL,
+    data_hora TIMESTAMP NOT NULL,
+    tipo VARCHAR(50) NOT NULL,
     custo DECIMAL(10, 2),
-    PRIMARY KEY (Gato_ID, Veterinario_CPF, data_hora),
-    FOREIGN KEY (Gato_ID) REFERENCES Gato(ID),
-    FOREIGN KEY (Veterinario_CPF) REFERENCES Veterinario(CPF)
+    descricao TEXT,
+    PRIMARY KEY (gato_id, veterinario_cpf, data_hora),
+    FOREIGN KEY (gato_id) REFERENCES gato(id) ON DELETE CASCADE,
+    FOREIGN KEY (veterinario_cpf) REFERENCES veterinario(cpf) ON DELETE RESTRICT,
+    CONSTRAINT chk_procedimento_custo CHECK (custo IS NULL OR custo >= 0),
+    CONSTRAINT chk_procedimento_data CHECK (data_hora <= CURRENT_TIMESTAMP),
+    CONSTRAINT chk_procedimento_tipo CHECK (tipo IN ('CONSULTA', 'VACINACAO', 'CASTRACAO', 'CIRURGIA', 'EXAME', 'EMERGENCIA', 'TRATAMENTO', 'OUTROS'))
 );
 
 -- Tabela para registrar as preferências de um potencial adotante.
-CREATE TABLE Preferencia (
-    Adotante_CPF VARCHAR(11) NOT NULL,
-    data DATE NOT NULL,
-    idade_pref VARCHAR(50),
-    cor_pref VARCHAR(50),
-    raca_pref VARCHAR(50),
-    PRIMARY KEY (Adotante_CPF, data),
-    FOREIGN KEY (Adotante_CPF) REFERENCES Adotante(CPF)
+CREATE TABLE preferencia (
+    adotante_cpf VARCHAR(11) NOT NULL PRIMARY KEY,
+    idade_preferida VARCHAR(50),
+    cor_preferida VARCHAR(50),
+    raca_preferida VARCHAR(50),
+    FOREIGN KEY (adotante_cpf) REFERENCES adotante(cpf) ON DELETE CASCADE
 );
 
 -- Tabela de triagem de um potencial adotante.
-CREATE TABLE Triagem (
-    Adotante_CPF VARCHAR(11) NOT NULL,
+CREATE TABLE triagem (
+    adotante_cpf VARCHAR(11) NOT NULL,
     data DATE NOT NULL,
-    responsavel_CPF VARCHAR(11) NOT NULL,
-    resultado VARCHAR(50), -- Ex: Aprovado, Reprovado
-    PRIMARY KEY (Adotante_CPF, data),
-    FOREIGN KEY (Adotante_CPF) REFERENCES Adotante(CPF),
-    FOREIGN KEY (responsavel_CPF) REFERENCES Voluntario(CPF)
+    responsavel_cpf VARCHAR(11) NOT NULL,
+    resultado VARCHAR(50),
+    PRIMARY KEY (adotante_cpf, data),
+    FOREIGN KEY (adotante_cpf) REFERENCES adotante(cpf) ON DELETE CASCADE,
+    FOREIGN KEY (responsavel_cpf) REFERENCES voluntario(cpf) ON DELETE RESTRICT,
+    CONSTRAINT chk_triagem_resultado CHECK (resultado IS NULL OR resultado IN ('APROVADO', 'REPROVADO', 'PENDENTE')),
+    CONSTRAINT chk_triagem_data CHECK (data <= CURRENT_DATE)
 );
 
 -- Tabela para armazenar fotos da triagem (ex: fotos da casa).
-CREATE TABLE Fotos_Triagem (
-    Adotante_CPF VARCHAR(11) NOT NULL,
-    Triagem_data DATE NOT NULL,
+CREATE TABLE fotos_triagem (
+    adotante_cpf VARCHAR(11) NOT NULL,
+    triagem_data DATE NOT NULL,
     foto_url VARCHAR(255) NOT NULL,
-    PRIMARY KEY (Adotante_CPF, Triagem_data, foto_url),
-    FOREIGN KEY (Adotante_CPF, Triagem_data) REFERENCES Triagem(Adotante_CPF, data)
+    PRIMARY KEY (adotante_cpf, triagem_data, foto_url),
+    FOREIGN KEY (adotante_cpf, triagem_data) REFERENCES triagem(adotante_cpf, data) ON DELETE CASCADE
 );
 
 -- Tabela para formalizar a adoção.
-CREATE TABLE Adocao (
-    Gato_ID INT NOT NULL,
-    Adotante_CPF VARCHAR(11) NOT NULL,
+CREATE TABLE adocao (
+    gato_id INT NOT NULL,
+    adotante_cpf VARCHAR(11) NOT NULL,
     data DATE NOT NULL,
     motivo TEXT,
-    PRIMARY KEY (Gato_ID, Adotante_CPF, data),
-    FOREIGN KEY (Gato_ID) REFERENCES Gato(ID),
-    FOREIGN KEY (Adotante_CPF) REFERENCES Adotante(CPF)
+    PRIMARY KEY (gato_id, adotante_cpf, data),
+    FOREIGN KEY (gato_id) REFERENCES gato(id) ON DELETE RESTRICT,
+    FOREIGN KEY (adotante_cpf) REFERENCES adotante(cpf) ON DELETE RESTRICT,
+    CONSTRAINT chk_adocao_data CHECK (data <= CURRENT_DATE)
 );
 
 -- Tabela para registrar devoluções.
-CREATE TABLE Devolucao (
-    Gato_ID INT NOT NULL,
-    Adotante_CPF VARCHAR(11) NOT NULL,
+CREATE TABLE devolucao (
+    gato_id INT NOT NULL,
+    adotante_cpf VARCHAR(11) NOT NULL,
     data DATE NOT NULL,
     motivo TEXT,
-    PRIMARY KEY (Gato_ID, Adotante_CPF, data),
-    FOREIGN KEY (Gato_ID) REFERENCES Gato(ID),
-    FOREIGN KEY (Adotante_CPF) REFERENCES Adotante(CPF)
+    PRIMARY KEY (gato_id, adotante_cpf, data),
+    FOREIGN KEY (gato_id) REFERENCES gato(id) ON DELETE RESTRICT,
+    FOREIGN KEY (adotante_cpf) REFERENCES adotante(cpf) ON DELETE RESTRICT,
+    CONSTRAINT chk_devolucao_data CHECK (data <= CURRENT_DATE)
 );

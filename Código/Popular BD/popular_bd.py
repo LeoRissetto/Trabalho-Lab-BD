@@ -23,9 +23,29 @@ voluntarios_cpfs = []
 adotantes_cpfs = []
 veterinarios_cpfs = []
 gatos_ids = []
-campanhas_nomes = []
+campanhas_ids = []
 eventos_ids = []
 lares_ids = []
+enderecos_ids = []
+enderecos_usados_lares = []  # Para controlar endereços únicos de lares
+
+
+def limpar_banco(cursor):
+    """Limpa todas as tabelas do banco de dados"""
+    print("Limpando tabelas existentes...")
+    
+    # Ordem de limpeza respeitando as foreign keys
+    tabelas = [
+        'devolucao', 'adocao', 'fotos_triagem', 'triagem', 'preferencia',
+        'procedimento', 'gasto', 'hospedagem', 'fotos_gato', 'gatos_evento',
+        'voluntarios_evento', 'cuida_lar', 'contato', 'participantes',
+        'doacao', 'funcao', 'lar_temporario', 'veterinario', 'adotante',
+        'voluntario', 'evento', 'campanha', 'gato', 'pessoa', 'endereco'
+    ]
+    
+    for tabela in tabelas:
+        cursor.execute(f"DELETE FROM {tabela}")
+        print(f"  Tabela {tabela} limpa")
 
 
 def conectar_bd():
@@ -56,8 +76,34 @@ def gerar_cpf_valido():
     return ''.join(map(str, cpf))
 
 
+def popular_enderecos(cursor, quantidade=200):
+    """Popula a tabela endereco"""
+    print(f"Inserindo {quantidade} endereços...")
+    
+    estados_br = ['SP', 'RJ', 'MG', 'RS', 'PR', 'SC', 'BA', 'GO', 'PE', 'CE']
+    complementos = ['Apto 101', 'Bloco A', 'Casa 2', 'Fundos', 'Sobrado', 'Apto 201', 'Casa dos fundos']
+    
+    for _ in range(quantidade):
+        cep = fake.postcode().replace('-', '')
+        rua = fake.street_name()
+        numero = str(random.randint(1, 9999))
+        bairro = fake.neighborhood()
+        complemento = random.choice(complementos) if random.choice([True, False, False]) else None  # 33% chance
+        cidade = fake.city()
+        estado = random.choice(estados_br)
+        
+        cursor.execute("""
+            INSERT INTO endereco (cep, rua, numero, bairro, complemento, cidade, estado)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (cep, rua, numero, bairro, complemento, cidade, estado))
+        
+        endereco_id = cursor.fetchone()[0]
+        enderecos_ids.append(endereco_id)
+
+
 def popular_pessoas(cursor, quantidade=100):
-    """Popula a tabela Pessoa"""
+    """Popula a tabela pessoa"""
     print(f"Inserindo {quantidade} pessoas...")
     
     for _ in range(quantidade):
@@ -70,19 +116,16 @@ def popular_pessoas(cursor, quantidade=100):
         nome = fake.name()
         telefone = fake.phone_number()[:15]
         email = fake.unique.email()
-        cep = fake.postcode().replace('-', '')
-        numero = str(random.randint(1, 9999))
-        bairro = fake.neighborhood()
-        rua = fake.street_name()
+        endereco_id = random.choice(enderecos_ids) if random.choice([True, False, False]) else None  # 33% têm endereço
         
         cursor.execute("""
-            INSERT INTO Pessoa (CPF, nome, telefone, email, CEP, numero, bairro, rua)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """, (cpf, nome, telefone, email, cep, numero, bairro, rua))
+            INSERT INTO pessoa (cpf, nome, telefone, email, endereco_id)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (cpf, nome, telefone, email, endereco_id))
 
 
 def popular_gatos(cursor, quantidade=50):
-    """Popula a tabela Gato"""
+    """Popula a tabela gato"""
     print(f"Inserindo {quantidade} gatos...")
     
     cores = ['Preto', 'Branco', 'Cinza', 'Laranja', 'Malhado', 'Siamês', 'Rajado']
@@ -92,94 +135,96 @@ def popular_gatos(cursor, quantidade=50):
         nome = fake.first_name()
         idade = random.randint(0, 15)
         data_resgate = fake.date_between(start_date='-2y', end_date='today')
-        cep = fake.postcode().replace('-', '')
-        numero = str(random.randint(1, 9999))
-        bairro = fake.neighborhood()
-        rua = fake.street_name()
+        endereco_resgate_id = random.choice(enderecos_ids)
         cor = random.choice(cores)
         raca = random.choice(racas)
-        cond_saude = fake.text(max_nb_chars=200)
-        flag_adotado = random.choice([True, False])
+        condicao_saude = fake.text(max_nb_chars=200)
+        adotado = random.choice([True, False])
         
         cursor.execute("""
-            INSERT INTO Gato (nome, idade, data_resgate, CEP, numero, bairro, rua, cor, raca, cond_saude, flag_adotado)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING ID
-        """, (nome, idade, data_resgate, cep, numero, bairro, rua, cor, raca, cond_saude, flag_adotado))
+            INSERT INTO gato (nome, idade, data_resgate, endereco_resgate_id, cor, raca, condicao_saude, adotado)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (nome, idade, data_resgate, endereco_resgate_id, cor, raca, condicao_saude, adotado))
         
         gato_id = cursor.fetchone()[0]
         gatos_ids.append(gato_id)
 
 
 def popular_campanhas(cursor, quantidade=10):
-    """Popula a tabela Campanha"""
+    """Popula a tabela campanha"""
     print(f"Inserindo {quantidade} campanhas...")
+    
+    nomes_usados = []
     
     for i in range(quantidade):
         nome = f"Campanha {fake.catch_phrase()} {i+1}"
-        while nome in campanhas_nomes:  # Evita nomes duplicados
+        while nome in nomes_usados:  # Evita nomes duplicados
             nome = f"Campanha {fake.catch_phrase()} {i+1}"
         
-        campanhas_nomes.append(nome)
+        nomes_usados.append(nome)
         
-        data_ini = fake.date_between(start_date='-1y', end_date='today')
-        data_fim = fake.date_between(start_date=data_ini, end_date='+6m')
+        data_inicio = fake.date_between(start_date='-1y', end_date='today')
+        data_fim = fake.date_between(start_date=data_inicio, end_date='+6m')
         premio = fake.text(max_nb_chars=100)
         vencedor_cpf = random.choice(pessoas_cpfs) if random.choice([True, False]) else None
         
         cursor.execute("""
-            INSERT INTO Campanha (nome, data_ini, data_fim, premio, vencedor_CPF)
+            INSERT INTO campanha (nome, data_inicio, data_fim, premio, vencedor_cpf)
             VALUES (%s, %s, %s, %s, %s)
-        """, (nome, data_ini, data_fim, premio, vencedor_cpf))
+            RETURNING id
+        """, (nome, data_inicio, data_fim, premio, vencedor_cpf))
+        
+        campanha_id = cursor.fetchone()[0]
+        campanhas_ids.append(campanha_id)
 
 
 def popular_eventos(cursor, quantidade=20):
-    """Popula a tabela Evento"""
+    """Popula a tabela evento"""
     print(f"Inserindo {quantidade} eventos...")
     
     for _ in range(quantidade):
         nome = f"Evento {fake.catch_phrase()}"
-        data = fake.date_time_between(start_date='-6m', end_date='+6m')
-        cep = fake.postcode().replace('-', '')
-        numero = str(random.randint(1, 9999))
-        bairro = fake.neighborhood()
-        rua = fake.street_name()
+        data_inicio = fake.date_between(start_date='-6m', end_date='+6m')
+        data_fim = fake.date_between(start_date=data_inicio, end_date=data_inicio + timedelta(days=3)) if random.choice([True, False]) else None
+        endereco_id = random.choice(enderecos_ids)
         
         cursor.execute("""
-            INSERT INTO Evento (nome, data, CEP, numero, bairro, rua)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            RETURNING ID
-        """, (nome, data, cep, numero, bairro, rua))
+            INSERT INTO evento (nome, data_inicio, data_fim, endereco_id)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id
+        """, (nome, data_inicio, data_fim, endereco_id))
         
         evento_id = cursor.fetchone()[0]
         eventos_ids.append(evento_id)
 
 
 def popular_lares_temporarios(cursor, quantidade=15):
-    """Popula a tabela Lar_Temporario"""
+    """Popula a tabela lar_temporario"""
     print(f"Inserindo {quantidade} lares temporários...")
     
-    for _ in range(quantidade):
-        nome = f"Lar {fake.company()}"
-        cep = fake.postcode().replace('-', '')
-        numero = str(random.randint(1, 9999))
-        bairro = fake.neighborhood()
-        rua = fake.street_name()
-        capacidade_max = random.randint(5, 30)
+    # Garante que temos endereços suficientes disponíveis
+    enderecos_disponiveis = [e for e in enderecos_ids if e not in enderecos_usados_lares]
+    quantidade = min(quantidade, len(enderecos_disponiveis))
+    
+    for i in range(quantidade):
+        endereco_id = enderecos_disponiveis[i]
+        enderecos_usados_lares.append(endereco_id)  # Marca como usado
+        capacidade_maxima = random.randint(5, 30)
         
         # Inserir sem responsável inicialmente (será atualizado depois)
         cursor.execute("""
-            INSERT INTO Lar_Temporario (nome, CEP, numero, bairro, rua, capacidade_max, Voluntario_responsavel_CPF)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            RETURNING ID
-        """, (nome, cep, numero, bairro, rua, capacidade_max, None))
+            INSERT INTO lar_temporario (endereco_id, capacidade_maxima, responsavel_cpf)
+            VALUES (%s, %s, %s)
+            RETURNING id
+        """, (endereco_id, capacidade_maxima, None))
         
         lar_id = cursor.fetchone()[0]
         lares_ids.append(lar_id)
 
 
 def popular_voluntarios(cursor, quantidade=30):
-    """Popula a tabela Voluntario"""
+    """Popula a tabela voluntario"""
     print(f"Inserindo {quantidade} voluntários...")
     
     cpfs_disponiveis = [cpf for cpf in pessoas_cpfs if cpf not in voluntarios_cpfs]
@@ -190,13 +235,13 @@ def popular_voluntarios(cursor, quantidade=30):
         voluntarios_cpfs.append(cpf)
         
         cursor.execute("""
-            INSERT INTO Voluntario (CPF)
+            INSERT INTO voluntario (cpf)
             VALUES (%s)
         """, (cpf,))
 
 
 def popular_adotantes(cursor, quantidade=40):
-    """Popula a tabela Adotante"""
+    """Popula a tabela adotante"""
     print(f"Inserindo {quantidade} adotantes...")
     
     cpfs_disponiveis = [cpf for cpf in pessoas_cpfs if cpf not in voluntarios_cpfs and cpf not in adotantes_cpfs]
@@ -206,16 +251,16 @@ def popular_adotantes(cursor, quantidade=40):
         cpf = cpfs_disponiveis[i]
         adotantes_cpfs.append(cpf)
         
-        flag_procurando_gato = random.choice([True, False])
+        procurando_gato = random.choice([True, False])
         
         cursor.execute("""
-            INSERT INTO Adotante (CPF, flag_procurando_gato)
+            INSERT INTO adotante (cpf, procurando_gato)
             VALUES (%s, %s)
-        """, (cpf, flag_procurando_gato))
+        """, (cpf, procurando_gato))
 
 
 def popular_veterinarios(cursor, quantidade=8):
-    """Popula a tabela Veterinario"""
+    """Popula a tabela veterinario"""
     print(f"Inserindo {quantidade} veterinários...")
     
     especialidades = ['Clínica Geral', 'Cirurgia', 'Dermatologia', 'Cardiologia', 'Oncologia']
@@ -230,18 +275,19 @@ def popular_veterinarios(cursor, quantidade=8):
         cpf = cpfs_disponiveis[i]
         veterinarios_cpfs.append(cpf)
         
-        crmv = f"CRMV{random.randint(1000, 9999)}"
+        # Formato correto: número-estado (ex: 1234-SP)
+        crmv = f"{random.randint(1000, 9999)}-SP"
         especialidade = random.choice(especialidades)
         clinica = f"Clínica {fake.company()}"
         
         cursor.execute("""
-            INSERT INTO Veterinario (CPF, CRMV, especialidade, clinica)
+            INSERT INTO veterinario (cpf, crmv, especialidade, clinica)
             VALUES (%s, %s, %s, %s)
         """, (cpf, crmv, especialidade, clinica))
 
 
 def popular_funcoes(cursor):
-    """Popula a tabela Funcao"""
+    """Popula a tabela funcao"""
     print("Inserindo funções dos voluntários...")
     
     funcoes = ['Resgate', 'Cuidador', 'Transporte', 'Triagem', 'Administração', 'Captação de Recursos']
@@ -252,16 +298,16 @@ def popular_funcoes(cursor):
         
         for funcao in funcoes_escolhidas:
             cursor.execute("""
-                INSERT INTO Funcao (Voluntario_CPF, funcao)
+                INSERT INTO funcao (voluntario_cpf, funcao)
                 VALUES (%s, %s)
             """, (voluntario_cpf, funcao))
 
 
 def popular_doacoes(cursor, quantidade=80):
-    """Popula a tabela Doacao"""
+    """Popula a tabela doacao"""
     print(f"Inserindo {quantidade} doações...")
     
-    formas_pagamento = ['PIX', 'Cartão de Crédito', 'Transferência', 'Dinheiro', 'Boleto']
+    formas_pagamento = ['PIX', 'CARTAO_CREDITO', 'TRANSFERENCIA', 'DINHEIRO', 'CARTAO_DEBITO']
     
     for _ in range(quantidade):
         data = fake.date_between(start_date='-1y', end_date='today')
@@ -270,28 +316,28 @@ def popular_doacoes(cursor, quantidade=80):
         pessoa_cpf = random.choice(pessoas_cpfs)
         
         cursor.execute("""
-            INSERT INTO Doacao (data, valor, forma_de_pagamento, Pessoa_CPF)
+            INSERT INTO doacao (data, valor, forma_pagamento, pessoa_cpf)
             VALUES (%s, %s, %s, %s)
         """, (data, valor, forma_pagamento, pessoa_cpf))
 
 
 def popular_participantes(cursor):
-    """Popula a tabela Participantes"""
+    """Popula a tabela participantes"""
     print("Inserindo participantes das campanhas...")
     
-    for campanha_nome in campanhas_nomes:
+    for campanha_id in campanhas_ids:
         num_participantes = random.randint(5, 20)
         participantes = random.sample(pessoas_cpfs, min(num_participantes, len(pessoas_cpfs)))
         
         for pessoa_cpf in participantes:
             cursor.execute("""
-                INSERT INTO Participantes (Pessoa_CPF, Campanha_nome)
+                INSERT INTO participantes (pessoa_cpf, campanha_id)
                 VALUES (%s, %s)
-            """, (pessoa_cpf, campanha_nome))
+            """, (pessoa_cpf, campanha_id))
 
 
 def popular_contatos(cursor, quantidade=100):
-    """Popula a tabela Contato"""
+    """Popula a tabela contato"""
     print(f"Inserindo {quantidade} contatos...")
     
     assuntos = [
@@ -301,17 +347,17 @@ def popular_contatos(cursor, quantidade=100):
     
     for _ in range(quantidade):
         pessoa_cpf = random.choice(pessoas_cpfs)
-        data = fake.date_time_between(start_date='-1y', end_date='now')
+        data_hora = fake.date_time_between(start_date='-1y', end_date='now')
         assunto = random.choice(assuntos)
         
         cursor.execute("""
-            INSERT INTO Contato (Pessoa_CPF, data, assunto)
+            INSERT INTO contato (pessoa_cpf, data_hora, assunto)
             VALUES (%s, %s, %s)
-        """, (pessoa_cpf, data, assunto))
+        """, (pessoa_cpf, data_hora, assunto))
 
 
 def popular_cuida_lar(cursor):
-    """Popula a tabela Cuida_Lar"""
+    """Popula a tabela cuida_lar"""
     print("Inserindo cuidadores de lares temporários...")
     
     for lar_id in lares_ids:
@@ -320,37 +366,43 @@ def popular_cuida_lar(cursor):
         
         for voluntario_cpf in cuidadores:
             cursor.execute("""
-                INSERT INTO Cuida_Lar (Lar_ID, Voluntario_CPF)
+                INSERT INTO cuida_lar (lar_id, voluntario_cpf)
                 VALUES (%s, %s)
             """, (lar_id, voluntario_cpf))
 
 
-def popular_participa_evento(cursor):
-    """Popula a tabela Participa_Evento"""
-    print("Inserindo participações em eventos...")
+def popular_voluntarios_evento(cursor):
+    """Popula a tabela voluntarios_evento"""
+    print("Inserindo voluntários em eventos...")
     
     for evento_id in eventos_ids:
-        num_participacoes = random.randint(1, 5)
+        num_voluntarios = random.randint(1, 5)
+        voluntarios_escolhidos = random.sample(voluntarios_cpfs, min(num_voluntarios, len(voluntarios_cpfs)))
         
-        for _ in range(num_participacoes):
-            voluntario_cpf = random.choice(voluntarios_cpfs)
-            gato_id = random.choice(gatos_ids)
-            
-            # Verifica se já existe essa combinação
+        for voluntario_cpf in voluntarios_escolhidos:
             cursor.execute("""
-                SELECT 1 FROM Participa_Evento 
-                WHERE Voluntario_CPF = %s AND Gato_ID = %s AND Evento_ID = %s
-            """, (voluntario_cpf, gato_id, evento_id))
-            
-            if not cursor.fetchone():
-                cursor.execute("""
-                    INSERT INTO Participa_Evento (Voluntario_CPF, Gato_ID, Evento_ID)
-                    VALUES (%s, %s, %s)
-                """, (voluntario_cpf, gato_id, evento_id))
+                INSERT INTO voluntarios_evento (evento_id, voluntario_cpf)
+                VALUES (%s, %s)
+            """, (evento_id, voluntario_cpf))
+
+
+def popular_gatos_evento(cursor):
+    """Popula a tabela gatos_evento"""
+    print("Inserindo gatos em eventos...")
+    
+    for evento_id in eventos_ids:
+        num_gatos = random.randint(1, 8)
+        gatos_escolhidos = random.sample(gatos_ids, min(num_gatos, len(gatos_ids)))
+        
+        for gato_id in gatos_escolhidos:
+            cursor.execute("""
+                INSERT INTO gatos_evento (evento_id, gato_id)
+                VALUES (%s, %s)
+            """, (evento_id, gato_id))
 
 
 def popular_fotos_gato(cursor):
-    """Popula a tabela Fotos_Gato"""
+    """Popula a tabela fotos_gato"""
     print("Inserindo fotos dos gatos...")
     
     for gato_id in gatos_ids:
@@ -360,13 +412,13 @@ def popular_fotos_gato(cursor):
             foto_url = f"https://example.com/gatos/gato_{gato_id}_foto_{i+1}.jpg"
             
             cursor.execute("""
-                INSERT INTO Fotos_Gato (Gato_ID, foto_url)
+                INSERT INTO fotos_gato (gato_id, foto_url)
                 VALUES (%s, %s)
             """, (gato_id, foto_url))
 
 
 def popular_hospedagem(cursor):
-    """Popula a tabela Hospedagem"""
+    """Popula a tabela hospedagem"""
     print("Inserindo hospedagens...")
     
     for gato_id in gatos_ids:
@@ -376,16 +428,16 @@ def popular_hospedagem(cursor):
             data_saida = fake.date_between(start_date=data_entrada, end_date='today') if random.choice([True, False]) else None
             
             cursor.execute("""
-                INSERT INTO Hospedagem (Lar_Temporario_ID, Gato_ID, data_entrada, data_saida)
+                INSERT INTO hospedagem (lar_temporario_id, gato_id, data_entrada, data_saida)
                 VALUES (%s, %s, %s, %s)
             """, (lar_id, gato_id, data_entrada, data_saida))
 
 
 def popular_gastos(cursor, quantidade=150):
-    """Popula a tabela Gasto"""
+    """Popula a tabela gasto"""
     print(f"Inserindo {quantidade} gastos...")
     
-    tipos = ['Veterinário', 'Ração', 'Medicamento', 'Transporte', 'Material de Limpeza', 'Brinquedos']
+    tipos = ['ALIMENTACAO', 'VETERINARIO', 'MEDICAMENTO', 'TRANSPORTE', 'HIGIENE', 'MANUTENCAO']
     
     for _ in range(quantidade):
         data = fake.date_between(start_date='-1y', end_date='today')
@@ -402,16 +454,16 @@ def popular_gastos(cursor, quantidade=150):
             lar_id = random.choice(lares_ids)
         
         cursor.execute("""
-            INSERT INTO Gasto (data, valor, descricao, tipo, Lar_ID, Gato_ID)
+            INSERT INTO gasto (data, valor, descricao, tipo, lar_id, gato_id)
             VALUES (%s, %s, %s, %s, %s, %s)
         """, (data, valor, descricao, tipo, lar_id, gato_id))
 
 
 def popular_procedimentos(cursor, quantidade=100):
-    """Popula a tabela Procedimento"""
+    """Popula a tabela procedimento"""
     print(f"Inserindo {quantidade} procedimentos veterinários...")
     
-    tipos = ['Consulta', 'Vacinação', 'Castração', 'Cirurgia', 'Exame', 'Tratamento']
+    tipos = ['CONSULTA', 'VACINACAO', 'CASTRACAO', 'CIRURGIA', 'EXAME', 'TRATAMENTO']
     
     for _ in range(quantidade):
         gato_id = random.choice(gatos_ids)
@@ -419,15 +471,16 @@ def popular_procedimentos(cursor, quantidade=100):
         data_hora = fake.date_time_between(start_date='-1y', end_date='now')
         tipo = random.choice(tipos)
         custo = Decimal(str(random.uniform(50.0, 800.0))).quantize(Decimal('0.01'))
+        descricao = fake.text(max_nb_chars=200)
         
         cursor.execute("""
-            INSERT INTO Procedimento (Gato_ID, Veterinario_CPF, data_hora, tipo, custo)
-            VALUES (%s, %s, %s, %s, %s)
-        """, (gato_id, veterinario_cpf, data_hora, tipo, custo))
+            INSERT INTO procedimento (gato_id, veterinario_cpf, data_hora, tipo, custo, descricao)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (gato_id, veterinario_cpf, data_hora, tipo, custo, descricao))
 
 
 def popular_preferencias(cursor):
-    """Popula a tabela Preferencia"""
+    """Popula a tabela preferencia"""
     print("Inserindo preferências dos adotantes...")
     
     idades_pref = ['Filhote', 'Adulto', 'Idoso', 'Qualquer']
@@ -436,22 +489,21 @@ def popular_preferencias(cursor):
     
     for adotante_cpf in adotantes_cpfs:
         if random.choice([True, False]):  # 50% dos adotantes têm preferências registradas
-            data = fake.date_between(start_date='-6m', end_date='today')
-            idade_pref = random.choice(idades_pref)
-            cor_pref = random.choice(cores_pref)
-            raca_pref = random.choice(racas_pref)
+            idade_preferida = random.choice(idades_pref)
+            cor_preferida = random.choice(cores_pref)
+            raca_preferida = random.choice(racas_pref)
             
             cursor.execute("""
-                INSERT INTO Preferencia (Adotante_CPF, data, idade_pref, cor_pref, raca_pref)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (adotante_cpf, data, idade_pref, cor_pref, raca_pref))
+                INSERT INTO preferencia (adotante_cpf, idade_preferida, cor_preferida, raca_preferida)
+                VALUES (%s, %s, %s, %s)
+            """, (adotante_cpf, idade_preferida, cor_preferida, raca_preferida))
 
 
 def popular_triagens(cursor):
-    """Popula a tabela Triagem"""
+    """Popula a tabela triagem"""
     print("Inserindo triagens dos adotantes...")
     
-    resultados = ['Aprovado', 'Reprovado', 'Pendente']
+    resultados = ['APROVADO', 'REPROVADO', 'PENDENTE']
     
     for adotante_cpf in adotantes_cpfs:
         if random.choice([True, False, False]):  # 33% dos adotantes passaram por triagem
@@ -460,17 +512,17 @@ def popular_triagens(cursor):
             resultado = random.choice(resultados)
             
             cursor.execute("""
-                INSERT INTO Triagem (Adotante_CPF, data, responsavel_CPF, resultado)
+                INSERT INTO triagem (adotante_cpf, data, responsavel_cpf, resultado)
                 VALUES (%s, %s, %s, %s)
             """, (adotante_cpf, data, responsavel_cpf, resultado))
 
 
 def popular_fotos_triagem(cursor):
-    """Popula a tabela Fotos_Triagem"""
+    """Popula a tabela fotos_triagem"""
     print("Inserindo fotos das triagens...")
     
     # Busca triagens existentes
-    cursor.execute("SELECT Adotante_CPF, data FROM Triagem")
+    cursor.execute("SELECT adotante_cpf, data FROM triagem")
     triagens = cursor.fetchall()
     
     for adotante_cpf, data_triagem in triagens:
@@ -480,13 +532,13 @@ def popular_fotos_triagem(cursor):
             foto_url = f"https://example.com/triagens/{adotante_cpf}_{data_triagem}_foto_{i+1}.jpg"
             
             cursor.execute("""
-                INSERT INTO Fotos_Triagem (Adotante_CPF, Triagem_data, foto_url)
+                INSERT INTO fotos_triagem (adotante_cpf, triagem_data, foto_url)
                 VALUES (%s, %s, %s)
             """, (adotante_cpf, data_triagem, foto_url))
 
 
 def popular_adocoes(cursor, quantidade=20):
-    """Popula a tabela Adocao"""
+    """Popula a tabela adocao"""
     print(f"Inserindo {quantidade} adoções...")
     
     motivos = ['Amor por animais', 'Companhia', 'Ajudar animal necessitado', 'Pedido da família']
@@ -501,19 +553,19 @@ def popular_adocoes(cursor, quantidade=20):
         motivo = random.choice(motivos)
         
         cursor.execute("""
-            INSERT INTO Adocao (Gato_ID, Adotante_CPF, data, motivo)
+            INSERT INTO adocao (gato_id, adotante_cpf, data, motivo)
             VALUES (%s, %s, %s, %s)
         """, (gato_id, adotante_cpf, data, motivo))
 
 
 def popular_devolucoes(cursor, quantidade=3):
-    """Popula a tabela Devolucao"""
+    """Popula a tabela devolucao"""
     print(f"Inserindo {quantidade} devoluções...")
     
     motivos = ['Problemas de saúde do animal', 'Mudança de residência', 'Alergia', 'Problemas comportamentais']
     
     # Busca algumas adoções para criar devoluções
-    cursor.execute("SELECT Gato_ID, Adotante_CPF, data FROM Adocao LIMIT %s", (quantidade,))
+    cursor.execute("SELECT gato_id, adotante_cpf, data FROM adocao LIMIT %s", (quantidade,))
     adocoes = cursor.fetchall()
     
     for gato_id, adotante_cpf, data_adocao in adocoes:
@@ -521,7 +573,7 @@ def popular_devolucoes(cursor, quantidade=3):
         motivo = random.choice(motivos)
         
         cursor.execute("""
-            INSERT INTO Devolucao (Gato_ID, Adotante_CPF, data, motivo)
+            INSERT INTO devolucao (gato_id, adotante_cpf, data, motivo)
             VALUES (%s, %s, %s, %s)
         """, (gato_id, adotante_cpf, data_devolucao, motivo))
 
@@ -532,15 +584,15 @@ def atualizar_responsaveis_lares(cursor):
     
     for lar_id in lares_ids:
         # Busca voluntários que cuidam deste lar
-        cursor.execute("SELECT Voluntario_CPF FROM Cuida_Lar WHERE Lar_ID = %s LIMIT 1", (lar_id,))
+        cursor.execute("SELECT voluntario_cpf FROM cuida_lar WHERE lar_id = %s LIMIT 1", (lar_id,))
         result = cursor.fetchone()
         
         if result:
             responsavel_cpf = result[0]
             cursor.execute("""
-                UPDATE Lar_Temporario 
-                SET Voluntario_responsavel_CPF = %s 
-                WHERE ID = %s
+                UPDATE lar_temporario 
+                SET responsavel_cpf = %s 
+                WHERE id = %s
             """, (responsavel_cpf, lar_id))
 
 
@@ -553,10 +605,11 @@ def main():
     cursor = conn.cursor()
     
     try:
-        # Desabilita temporariamente as foreign key constraints (PostgreSQL)
-        # Não é necessário desabilitar se seguirmos a ordem correta de inserção
+        # Limpa dados existentes
+        limpar_banco(cursor)
         
         # 1. Popula tabelas base sem foreign keys
+        popular_enderecos(cursor, 200)
         popular_pessoas(cursor, 100)
         popular_gatos(cursor, 50)
         popular_campanhas(cursor, 10)
@@ -576,7 +629,8 @@ def main():
         popular_participantes(cursor)
         popular_contatos(cursor, 100)
         popular_cuida_lar(cursor)
-        popular_participa_evento(cursor)
+        popular_voluntarios_evento(cursor)
+        popular_gatos_evento(cursor)
         popular_fotos_gato(cursor)
         popular_hospedagem(cursor)
         popular_gastos(cursor, 150)
@@ -590,19 +644,18 @@ def main():
         # Atualiza campos que dependem de outros dados
         atualizar_responsaveis_lares(cursor)
         
-        # Foreign keys permanecem habilitadas (ordem correta de inserção)
-        
         # Commit das transações
         conn.commit()
         
         print("=" * 50)
         print("População do banco de dados concluída com sucesso!")
+        print(f"Total de endereços inseridos: {len(enderecos_ids)}")
         print(f"Total de pessoas inseridas: {len(pessoas_cpfs)}")
         print(f"Total de voluntários: {len(voluntarios_cpfs)}")
         print(f"Total de adotantes: {len(adotantes_cpfs)}")
         print(f"Total de veterinários: {len(veterinarios_cpfs)}")
         print(f"Total de gatos: {len(gatos_ids)}")
-        print(f"Total de campanhas: {len(campanhas_nomes)}")
+        print(f"Total de campanhas: {len(campanhas_ids)}")
         print(f"Total de eventos: {len(eventos_ids)}")
         print(f"Total de lares temporários: {len(lares_ids)}")
         
