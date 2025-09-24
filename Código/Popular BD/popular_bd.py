@@ -58,24 +58,6 @@ def conectar_bd():
         sys.exit(1)
 
 
-def gerar_cpf_valido():
-    """Gera um CPF válido fictício"""
-    # Gera 9 primeiros dígitos
-    cpf = [random.randint(0, 9) for _ in range(9)]
-    
-    # Calcula primeiro dígito verificador
-    soma = sum(a * b for a, b in zip(cpf, range(10, 1, -1)))
-    resto = soma % 11
-    cpf.append(0 if resto < 2 else 11 - resto)
-    
-    # Calcula segundo dígito verificador
-    soma = sum(a * b for a, b in zip(cpf, range(11, 1, -1)))
-    resto = soma % 11
-    cpf.append(0 if resto < 2 else 11 - resto)
-    
-    return ''.join(map(str, cpf))
-
-
 def popular_enderecos(cursor, quantidade=200):
     """Popula a tabela endereco"""
     print(f"Inserindo {quantidade} endereços...")
@@ -107,10 +89,7 @@ def popular_pessoas(cursor, quantidade=100):
     print(f"Inserindo {quantidade} pessoas...")
     
     for _ in range(quantidade):
-        cpf = gerar_cpf_valido()
-        while cpf in pessoas_cpfs:  # Evita CPFs duplicados
-            cpf = gerar_cpf_valido()
-        
+        cpf = fake.unique.cpf().replace('.', '').replace('-', '')
         pessoas_cpfs.append(cpf)
         
         nome = fake.name()
@@ -155,15 +134,8 @@ def popular_campanhas(cursor, quantidade=10):
     """Popula a tabela campanha"""
     print(f"Inserindo {quantidade} campanhas...")
     
-    nomes_usados = []
-    
     for i in range(quantidade):
-        nome = f"Campanha {fake.catch_phrase()} {i+1}"
-        while nome in nomes_usados:  # Evita nomes duplicados
-            nome = f"Campanha {fake.catch_phrase()} {i+1}"
-        
-        nomes_usados.append(nome)
-        
+        nome = f"Campanha {fake.unique.catch_phrase()} {i+1}"
         data_inicio = fake.date_between(start_date='-1y', end_date='today')
         data_fim = fake.date_between(start_date=data_inicio, end_date='+6m')
         premio = fake.text(max_nb_chars=100)
@@ -184,7 +156,7 @@ def popular_eventos(cursor, quantidade=20):
     print(f"Inserindo {quantidade} eventos...")
     
     for _ in range(quantidade):
-        nome = f"Evento {fake.catch_phrase()}"
+        nome = f"Evento {fake.unique.catch_phrase()}"
         data_inicio = fake.date_between(start_date='-6m', end_date='+6m')
         data_fim = fake.date_between(start_date=data_inicio, end_date=data_inicio + timedelta(days=3)) if random.choice([True, False]) else None
         endereco_id = random.choice(enderecos_ids)
@@ -276,9 +248,9 @@ def popular_veterinarios(cursor, quantidade=8):
         veterinarios_cpfs.append(cpf)
         
         # Formato correto: número-estado (ex: 1234-SP)
-        crmv = f"{random.randint(1000, 9999)}-SP"
+        crmv = fake.unique.bothify(text="####-SP", letters="")  # Gera CRMV único
         especialidade = random.choice(especialidades)
-        clinica = f"Clínica {fake.company()}"
+        clinica = f"Clínica {fake.unique.company()}"
         
         cursor.execute("""
             INSERT INTO veterinario (cpf, crmv, especialidade, clinica)
@@ -326,7 +298,7 @@ def popular_participantes(cursor):
     print("Inserindo participantes das campanhas...")
     
     for campanha_id in campanhas_ids:
-        num_participantes = random.randint(5, 20)
+        num_participantes = random.randint(15, 80)  # Mais participantes por campanha
         participantes = random.sample(pessoas_cpfs, min(num_participantes, len(pessoas_cpfs)))
         
         for pessoa_cpf in participantes:
@@ -361,7 +333,7 @@ def popular_cuida_lar(cursor):
     print("Inserindo cuidadores de lares temporários...")
     
     for lar_id in lares_ids:
-        num_cuidadores = random.randint(1, 3)
+        num_cuidadores = random.randint(2, 6)  # Mais cuidadores por lar
         cuidadores = random.sample(voluntarios_cpfs, min(num_cuidadores, len(voluntarios_cpfs)))
         
         for voluntario_cpf in cuidadores:
@@ -376,7 +348,7 @@ def popular_voluntarios_evento(cursor):
     print("Inserindo voluntários em eventos...")
     
     for evento_id in eventos_ids:
-        num_voluntarios = random.randint(1, 5)
+        num_voluntarios = random.randint(3, 15)  # Mais voluntários por evento
         voluntarios_escolhidos = random.sample(voluntarios_cpfs, min(num_voluntarios, len(voluntarios_cpfs)))
         
         for voluntario_cpf in voluntarios_escolhidos:
@@ -391,7 +363,7 @@ def popular_gatos_evento(cursor):
     print("Inserindo gatos em eventos...")
     
     for evento_id in eventos_ids:
-        num_gatos = random.randint(1, 8)
+        num_gatos = random.randint(5, 25)  # Mais gatos por evento
         gatos_escolhidos = random.sample(gatos_ids, min(num_gatos, len(gatos_ids)))
         
         for gato_id in gatos_escolhidos:
@@ -422,10 +394,10 @@ def popular_hospedagem(cursor):
     print("Inserindo hospedagens...")
     
     for gato_id in gatos_ids:
-        if random.choice([True, False]):  # 50% dos gatos passaram por lar temporário
+        if random.choice([True, False, True]):  # 67% dos gatos passaram por lar temporário
             lar_id = random.choice(lares_ids)
-            data_entrada = fake.date_between(start_date='-1y', end_date='today')
-            data_saida = fake.date_between(start_date=data_entrada, end_date='today') if random.choice([True, False]) else None
+            data_entrada = fake.date_between(start_date='-2y', end_date='today')
+            data_saida = fake.date_between(start_date=data_entrada, end_date='today') if random.choice([True, False, True]) else None
             
             cursor.execute("""
                 INSERT INTO hospedagem (lar_temporario_id, gato_id, data_entrada, data_saida)
@@ -601,6 +573,9 @@ def main():
     print("Iniciando população do banco de dados...")
     print("=" * 50)
     
+    # Limpa o cache do faker para garantir valores únicos
+    fake.unique.clear()
+    
     conn = conectar_bd()
     cursor = conn.cursor()
     
@@ -609,37 +584,37 @@ def main():
         limpar_banco(cursor)
         
         # 1. Popula tabelas base sem foreign keys
-        popular_enderecos(cursor, 200)
-        popular_pessoas(cursor, 100)
-        popular_gatos(cursor, 50)
-        popular_campanhas(cursor, 10)
-        popular_eventos(cursor, 20)
+        popular_enderecos(cursor, 2000)    # 10x mais endereços
+        popular_pessoas(cursor, 1500)      # 15x mais pessoas
+        popular_gatos(cursor, 800)         # 16x mais gatos
+        popular_campanhas(cursor, 50)      # 5x mais campanhas
+        popular_eventos(cursor, 120)       # 6x mais eventos
         
         # 2. Popula especializações de Pessoa (dependem de Pessoa)
-        popular_voluntarios(cursor, 30)
-        popular_adotantes(cursor, 40)
-        popular_veterinarios(cursor, 8)
+        popular_voluntarios(cursor, 200)   # ~7x mais voluntários
+        popular_adotantes(cursor, 400)     # 10x mais adotantes
+        popular_veterinarios(cursor, 25)   # ~3x mais veterinários
         
         # 3. Popula lares temporários (agora que voluntários existem)
-        popular_lares_temporarios(cursor, 15)
+        popular_lares_temporarios(cursor, 80)  # ~5x mais lares
         
         # Popula tabelas de relacionamento e transacionais
         popular_funcoes(cursor)
-        popular_doacoes(cursor, 80)
+        popular_doacoes(cursor, 1200)      # 15x mais doações
         popular_participantes(cursor)
-        popular_contatos(cursor, 100)
+        popular_contatos(cursor, 2500)     # 25x mais contatos
         popular_cuida_lar(cursor)
         popular_voluntarios_evento(cursor)
         popular_gatos_evento(cursor)
         popular_fotos_gato(cursor)
         popular_hospedagem(cursor)
-        popular_gastos(cursor, 150)
-        popular_procedimentos(cursor, 100)
+        popular_gastos(cursor, 2000)       # ~13x mais gastos
+        popular_procedimentos(cursor, 1500) # 15x mais procedimentos
         popular_preferencias(cursor)
         popular_triagens(cursor)
         popular_fotos_triagem(cursor)
-        popular_adocoes(cursor, 20)
-        popular_devolucoes(cursor, 3)
+        popular_adocoes(cursor, 300)       # 15x mais adoções
+        popular_devolucoes(cursor, 25)     # ~8x mais devoluções
         
         # Atualiza campos que dependem de outros dados
         atualizar_responsaveis_lares(cursor)
