@@ -25,20 +25,6 @@ lares_ids = []
 enderecos_ids = []
 enderecos_usados_lares = []
 
-
-def limpar_banco(cursor):
-    # Ordem de limpeza respeitando as foreign keys
-    tabelas = [
-        'devolucao', 'adocao', 'fotos_triagem', 'triagem', 'preferencia',
-        'procedimento', 'gasto', 'hospedagem', 'fotos_gato', 'gatos_evento',
-        'voluntarios_evento', 'cuida_lar', 'contato', 'participantes',
-        'doacao', 'funcao', 'lar_temporario', 'veterinario', 'adotante',
-        'voluntario', 'evento', 'campanha', 'gato', 'pessoa', 'endereco'
-    ]
-    for tabela in tabelas:
-        cursor.execute(f"DELETE FROM {tabela}")
-
-
 def conectar_bd():
     try:
         return psycopg2.connect(**DB_CONFIG)
@@ -562,7 +548,6 @@ def main():
     conn = conectar_bd()
     cursor = conn.cursor()
     try:
-        limpar_banco(cursor)
         popular_enderecos(cursor, 2000)
         popular_pessoas(cursor, 1500)
         popular_gatos(cursor, 800)
